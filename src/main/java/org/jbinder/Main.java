@@ -1,4 +1,4 @@
-package org.xmlgen;
+package org.jbinder;
 
 import javax.xml.stream.XMLStreamException;
 import java.io.*;

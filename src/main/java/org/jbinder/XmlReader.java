@@ -1,4 +1,4 @@
-package org.xmlgen;
+package org.jbinder;
 
 import javax.xml.stream.XMLEventReader;
 import javax.xml.stream.XMLInputFactory;
