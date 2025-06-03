@@ -1,45 +1,34 @@
 package org.jbinder;
 
-import javax.xml.stream.XMLEventReader;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.events.StartElement;
 import javax.xml.stream.events.XMLEvent;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 public class XmlReader {
-    public void read(Supplier<FileInputStream> inputStreamSupplier) {
-        try {
-            readXml(inputStreamSupplier);
-        } catch (XMLStreamException | IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
 
-    public void readXml(Supplier<FileInputStream> inputStreamSupplier) throws XMLStreamException, IOException {
-        var xmlReader = getReader(inputStreamSupplier);
-        while(xmlReader.hasNext()) {
-            var element = xmlReader.nextEvent();
-            if (XMLEvent.START_ELEMENT == element.getEventType()) {
-                parseStartElement(element.asStartElement());
-            }
-        }
-    }
-
-    private void parseStartElement(StartElement element) {
-        if ("element".equals(element.getName().getLocalPart())) {
-            var attributes = element.asStartElement().getAttributes();
-            while (attributes.hasNext()) {
-                var attribute = attributes.next();
-                System.out.println(attribute.getName() + ":" + attribute.getValue());
-            }
-        }
-    }
-
-    public XMLEventReader getReader(Supplier<FileInputStream> inputStreamSupplier) throws XMLStreamException {
+    public List<StartElement> readXml(Supplier<FileInputStream> inputStreamSupplier) throws XMLStreamException {
         XMLInputFactory xmlInputFactory = XMLInputFactory.newInstance();
-        return xmlInputFactory.createXMLEventReader(inputStreamSupplier.get());
+        var reader = xmlInputFactory.createXMLEventReader(inputStreamSupplier.get());
+
+        return Stream.generate(() -> null)
+                .takeWhile(x -> reader.hasNext())
+                .map(x -> {
+                    try {
+                        return reader.nextEvent();
+                    } catch (XMLStreamException e) {
+                        throw new RuntimeException(e);
+                    }
+                })
+                .filter(e -> e.getEventType() == XMLEvent.START_ELEMENT)
+                .map(XMLEvent::asStartElement)
+                .toList();
     }
 }
