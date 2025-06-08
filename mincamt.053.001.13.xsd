@@ -26,11 +26,13 @@
     </xs:simpleType>
     <xs:simpleType name="Max34Text">
         <xs:restriction base="xs:string">
-            <xs:maxLength value="35"/>
+            <xs:minLength value="1"/>
+            <xs:maxLength value="34"/>
         </xs:restriction>
     </xs:simpleType>
     <xs:simpleType name="Max35Text">
         <xs:restriction base="xs:string">
+            <xs:minLength value="1"/>
             <xs:maxLength value="35"/>
         </xs:restriction>
     </xs:simpleType>
