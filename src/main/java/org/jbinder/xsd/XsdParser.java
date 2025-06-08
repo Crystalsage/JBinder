@@ -1,85 +1,91 @@
 package org.jbinder.xsd;
 
-import org.jbinder.graph.TypeDAG;
 import org.jbinder.xsd.types.XsdStringType;
 
 import javax.xml.namespace.QName;
+import javax.xml.stream.events.Attribute;
 import javax.xml.stream.events.StartElement;
 import javax.xml.stream.events.XMLEvent;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 
 public class XsdParser {
-    static TypeDAG typeDAG = new TypeDAG();
 
-    public static void parse(List<XMLEvent> elements) {
-        List<XsdElement> xsdElements = new ArrayList<>();
+    public static ParseResult parse(List<XMLEvent> elements) {
+        List<ComplexType> complexTypes = new ArrayList<>();
+        List<SimpleType> simpleTypes = new ArrayList<>();
 
         var xmlEventsIterator = elements.iterator();
-        XMLEvent xmlEvent;
-
-        var complexTypes = new ArrayList<ComplexType>();
-        var simpleTypes = new ArrayList<SimpleType>();
 
         while (xmlEventsIterator.hasNext()) {
-            xmlEvent = xmlEventsIterator.next();
+            XMLEvent xmlEvent = xmlEventsIterator.next();
             if (xmlEvent.getEventType() == XMLEvent.START_ELEMENT) {
                 handleStartElement(xmlEvent, complexTypes, simpleTypes, xmlEventsIterator);
             }
         }
 
+        return new ParseResult(complexTypes, simpleTypes);
     }
 
-    private static void handleStartElement(XMLEvent xmlEvent, ArrayList<ComplexType> complexTypes, ArrayList<SimpleType> simpleTypes, Iterator<XMLEvent> xmlEventsIterator) {
+    private static void handleStartElement(XMLEvent xmlEvent, List<ComplexType> complexTypes, List<SimpleType> simpleTypes, Iterator<XMLEvent> xmlEventsIterator) {
         var startElement = xmlEvent.asStartElement();
         switch (startElement.getName().getLocalPart()) {
-            case "complexType" -> complexTypes.add(handleComplexType(startElement));
-            case "simpleType" -> simpleTypes.add(handleSimpleType(startElement, xmlEventsIterator));
+            case "complexType" -> handleComplexType(startElement).map(complexTypes::add);
+            case "simpleType" -> handleSimpleType(startElement, xmlEventsIterator).map(simpleTypes::add);
         }
     }
 
-    private static SimpleType handleSimpleType(StartElement startElement, Iterator<XMLEvent> xmlEventsIterator) {
-        SimpleType simpleType;
-
-        var simpleTypeName = getAttributeValue(startElement, "name");
+    private static Optional<SimpleType> handleSimpleType(StartElement startElement, Iterator<XMLEvent> xmlEventsIterator) {
+        var simpleTypeName = getAttributeValue(startElement, "name").orElse(null);
+        if (simpleTypeName == null) {
+            return Optional.empty();
+        }
 
         while (xmlEventsIterator.hasNext()) {
-            var nextEvent = xmlEventsIterator.next();
+            var nextEvent = getNext(xmlEventsIterator);
 
-            // Skip over character types, mostly whitespace
-            if (nextEvent.isCharacters()) {
-                continue;
+            if (isEndElement(nextEvent, "simpleType")) {
+                break;
             }
 
-            if (nextEvent.isStartElement()) {
-                if (nextEvent.asStartElement().getName().getLocalPart().equals("restriction")) {
-                    switch (getAttributeValue(nextEvent.asStartElement(), "base")) {
-                        case "xs:string" -> simpleType = getStringSimpleType(xmlEventsIterator, simpleTypeName);
-                        default ->
-                            throw new IllegalStateException("Unexpected value: " + getAttributeValue(nextEvent.asStartElement(), "base"));
-                    }
-                }
+            if (nextEvent.isStartElement() && startElementEquals(nextEvent.asStartElement(), "restriction")) {
+                var baseType = getAttributeValue(nextEvent.asStartElement(), "base").orElse("");
+                return switch (baseType) {
+                    case "xs:string" -> Optional.of(parseStringSimpleType(xmlEventsIterator, simpleTypeName));
+                    default -> throw new IllegalStateException("Unexpected value: " + getAttributeValue(nextEvent.asStartElement(), "base"));
+                };
             }
         }
 
-        return simpleType;
+        return Optional.empty();
+    }
+
+    private static boolean startElementEquals(StartElement startElement, String expectedName) {
+        return startElement.getName().getLocalPart().equals(expectedName);
+    }
+
+    private static boolean isEndElement(XMLEvent nextEvent, String elementName) {
+        return nextEvent.isEndElement() &&
+            nextEvent.asEndElement().getName().getLocalPart().equals(elementName);
     }
 
     // TODO: Maybe these handlers should get entire tag chunks instead of iterator
-    private static SimpleType getStringSimpleType(Iterator<XMLEvent> xmlEventsIterator, String simpleTypeName) {
+    private static SimpleType parseStringSimpleType(Iterator<XMLEvent> xmlEventsIterator, String simpleTypeName) {
         var xsdStringType = new XsdStringType();
 
         // Until we encounter the end of simpleType definition, collect the restrictions
         while (xmlEventsIterator.hasNext()) {
             var nextElement = getNext(xmlEventsIterator);
 
-            if (nextElement.isEndElement() && "simpleType".equals(nextElement.asEndElement().getName().getLocalPart())) {
+            if (isEndElement(nextElement, "simpleType")) {
                 break;
             }
 
+            // Process restrictions on string
             if (nextElement.isStartElement()) {
-                var restriction = getAttributeValue(nextElement.asStartElement(), "value");
+                var restriction = getAttributeValue(nextElement.asStartElement(), "value").orElse("");
                 switch (nextElement.asStartElement().getName().getLocalPart()) {
                     case "pattern" -> xsdStringType.setPattern(restriction);
                     case "maxLength" -> xsdStringType.setMaxLength(Integer.parseInt(restriction));
@@ -99,15 +105,16 @@ public class XsdParser {
         return nextEvent;
     }
 
-    private static ComplexType handleComplexType(StartElement complexTypeElement) {
-        return new ComplexType(getAttributeValue(complexTypeElement, "name"));
+    private static Optional<ComplexType> handleComplexType(StartElement complexTypeElement) {
+        var complexTypeName = getAttributeValue(complexTypeElement, "name");
+        return complexTypeName.map(ComplexType::new);
     }
 
-    private static String getAttributeValue(StartElement element, String attributeName) {
-        return element.getAttributeByName(new QName(attributeName)).getValue();
+    private static Optional<String> getAttributeValue(StartElement element, String attributeName) {
+        return Optional.ofNullable(element.getAttributeByName(new QName(attributeName)))
+            .map(Attribute::getValue);
     }
 
-    private static boolean isEndComplexType(XMLEvent xmlEvent) {
-        return xmlEvent.isEndElement() && "complexType".equals(xmlEvent.asEndElement().getName().getLocalPart());
+    public record ParseResult(List<ComplexType> complexTypes, List<SimpleType> simpleTypes) {
     }
 }
