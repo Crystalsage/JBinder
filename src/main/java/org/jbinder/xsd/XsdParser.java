@@ -38,7 +38,6 @@ public class XsdParser {
                     List<XMLEvent> complexTypeBlock = capture(xmlEventsIterator, "complexType");
                     for (XMLEvent event : complexTypeBlock) {
                         XsdElement target;
-                        var isSequence = "sequence".equals(Util.tagName(complexTypeBlock.getFirst()));
                         if ("element".equals(Util.tagName(event))) {
                             var dependeeType = types.get(Util.attributeValue(event, "type").get());
                             var source = new XsdElement(complexType.name(), complexType);
@@ -53,7 +52,13 @@ public class XsdParser {
             }
         }
 
-        System.out.println(typeDAG.sort());
+        var sorted = typeDAG.sort();
+        StringBuilder out = new StringBuilder();
+        out.append(sorted.getFirst().name());
+        for (XsdElement xsdElement : sorted.subList(1, sorted.size())) {
+            out.append(" --> ").append(xsdElement.name());
+        }
+        System.out.println(out);
     }
 
     private static List<XMLEvent> capture(Iterator<XMLEvent> xmlEventIterator, String name) {
