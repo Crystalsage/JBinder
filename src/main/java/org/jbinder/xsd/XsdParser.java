@@ -26,29 +26,23 @@ public class XsdParser {
         xmlEventsIterator = elements.iterator();
         while (xmlEventsIterator.hasNext()) {
             XMLEvent xmlEvent = xmlEventsIterator.next();
-            if (xmlEvent.getEventType() == XMLEvent.START_ELEMENT) {
-                var element = xmlEvent.asStartElement();
-                if ("complexType".equals(Util.tagName(element))) {
-                    var complexType = (ComplexType) types.get(Util.attributeValue(element, "name").get());
-                    // Special case
-                    if (complexType.name().equals("Document")) {
-                        typeDAG.saveRoot(new XsdElement(complexType.name(), complexType));
-                    }
+            if (xmlEvent.getEventType() != XMLEvent.START_ELEMENT || !"complexType".equals(Util.tagName(xmlEvent))) {
+                continue;
+            }
 
-                    List<XMLEvent> complexTypeBlock = capture(xmlEventsIterator, "complexType");
-                    for (XMLEvent event : complexTypeBlock) {
-                        XsdElement target;
-                        if ("element".equals(Util.tagName(event))) {
-                            var dependeeType = types.get(Util.attributeValue(event, "type").get());
-                            var source = new XsdElement(complexType.name(), complexType);
-                            target = switch (dependeeType) {
-                                case ComplexType c -> new XsdElement(c.name(),  c);
-                                case SimpleType s -> new XsdElement(s.name(), s);
-                            };
-                            typeDAG.put(source, target);
-                        }
-                    }
-                }
+            // Get current complex type
+            var complexType = (ComplexType) types.get(Util.attributeValue(xmlEvent, "name").get());
+
+            // Save root
+            if (complexType.name().equals("Document")) {
+                typeDAG.saveRoot(new XsdElement(complexType.name(), complexType));
+            }
+
+            List<XMLEvent> complexTypeBlock = capture(xmlEventsIterator, "complexType");
+            for (XMLEvent targetElement : complexTypeBlock) {
+                var source = new XsdElement(complexType.name(), complexType);
+                var target = getTarget(targetElement, types);
+                typeDAG.put(source, target);
             }
         }
 
@@ -61,16 +55,23 @@ public class XsdParser {
         System.out.println(out);
     }
 
+    private static XsdElement getTarget(XMLEvent targetElement, Map<String, XsdType> types) {
+        var dependeeType = types.get(Util.attributeValue(targetElement, "type").get());
+        return switch (dependeeType) {
+            case ComplexType c -> new XsdElement(c.name(), c);
+            case SimpleType s -> new XsdElement(s.name(), s);
+        };
+    }
+
     private static List<XMLEvent> capture(Iterator<XMLEvent> xmlEventIterator, String name) {
         var block = new ArrayList<XMLEvent>(10);
         while (xmlEventIterator.hasNext()) {
             var nextEvent = xmlEventIterator.next();
             if (nextEvent.isEndElement() && nextEvent.asEndElement().getName().getLocalPart().equals(name)) {
-                block.add(nextEvent);
                 return block;
             }
 
-            if (nextEvent.isStartElement()) {
+            if (nextEvent.isStartElement() && "element".equals(Util.tagName(nextEvent))) {
                 block.add(nextEvent);
             }
         }

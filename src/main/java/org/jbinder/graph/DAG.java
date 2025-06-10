@@ -10,9 +10,6 @@ public class DAG<T> {
     // There's a single root to our tree, always.
     T root;
 
-    public void DAG() {
-    }
-
     public void saveRoot(T root, Collection<T> children) {
         this.root = root;
         children.forEach(child -> put(root, child));
@@ -28,10 +25,6 @@ public class DAG<T> {
             .filter(e -> e.getValue().contains(node))
             .map(Map.Entry::getKey)
             .toList();
-    }
-
-    public T getRoot() {
-        return root;
     }
 
     // Kahn's
