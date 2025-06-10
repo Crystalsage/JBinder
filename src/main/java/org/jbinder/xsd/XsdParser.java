@@ -1,44 +1,88 @@
 package org.jbinder.xsd;
 
+import org.jbinder.graph.TypeDAG;
 import org.jbinder.xsd.types.XsdStringType;
 
-import javax.xml.namespace.QName;
-import javax.xml.stream.events.Attribute;
 import javax.xml.stream.events.StartElement;
 import javax.xml.stream.events.XMLEvent;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 public class XsdParser {
 
-    public static ParseResult parse(List<XMLEvent> elements) {
-        List<ComplexType> complexTypes = new ArrayList<>();
-        List<SimpleType> simpleTypes = new ArrayList<>();
+    public static void parse(List<XMLEvent> elements) {
+        Map<String, XsdType> types = new HashMap<>();
+        TypeDAG typeDAG = new TypeDAG();
 
         var xmlEventsIterator = elements.iterator();
 
         while (xmlEventsIterator.hasNext()) {
             XMLEvent xmlEvent = xmlEventsIterator.next();
             if (xmlEvent.getEventType() == XMLEvent.START_ELEMENT) {
-                handleStartElement(xmlEvent, complexTypes, simpleTypes, xmlEventsIterator);
+                handleStartElement(xmlEvent, types, xmlEventsIterator);
             }
         }
 
-        return new ParseResult(complexTypes, simpleTypes);
+        // Refresh iterator
+        xmlEventsIterator = elements.iterator();
+        while (xmlEventsIterator.hasNext()) {
+            XMLEvent xmlEvent = xmlEventsIterator.next();
+            if (xmlEvent.getEventType() == XMLEvent.START_ELEMENT) {
+                var element = xmlEvent.asStartElement();
+                if ("complexType".equals(Util.tagName(element))) {
+                    var complexType = (ComplexType) types.get(Util.attributeValue(element, "name").get());
+                    // Special case
+                    if (complexType.name().equals("Document")) {
+                        typeDAG.saveRoot(new XsdElement(complexType.name(), complexType));
+                    }
+
+                    List<XMLEvent> complexTypeBlock = capture(xmlEventsIterator, "complexType");
+                    for (XMLEvent event : complexTypeBlock) {
+                        XsdElement target;
+                        var isSequence = "sequence".equals(Util.tagName(complexTypeBlock.getFirst()));
+                        if ("element".equals(Util.tagName(event))) {
+                            var dependeeType = types.get(Util.attributeValue(event, "type").get());
+                            var source = new XsdElement(complexType.name(), complexType);
+                            target = switch (dependeeType) {
+                                case ComplexType c -> new XsdElement(c.name(),  c);
+                                case SimpleType s -> new XsdElement(s.name(), s);
+                            };
+                            typeDAG.put(source, target);
+                        }
+                    }
+                }
+            }
+        }
+
+        System.out.println(typeDAG.sort());
     }
 
-    private static void handleStartElement(XMLEvent xmlEvent, List<ComplexType> complexTypes, List<SimpleType> simpleTypes, Iterator<XMLEvent> xmlEventsIterator) {
+    private static List<XMLEvent> capture(Iterator<XMLEvent> xmlEventIterator, String name) {
+        var block = new ArrayList<XMLEvent>(10);
+        while (xmlEventIterator.hasNext()) {
+            var nextEvent = xmlEventIterator.next();
+            if (nextEvent.isEndElement() && nextEvent.asEndElement().getName().getLocalPart().equals(name)) {
+                block.add(nextEvent);
+                return block;
+            }
+
+            if (nextEvent.isStartElement()) {
+                block.add(nextEvent);
+            }
+        }
+
+        return block;
+    }
+
+    private static void handleStartElement(XMLEvent xmlEvent, Map<String, XsdType> xsdTypes, Iterator<XMLEvent> xmlEventsIterator) {
         var startElement = xmlEvent.asStartElement();
-        switch (startElement.getName().getLocalPart()) {
-            case "complexType" -> handleComplexType(startElement).map(complexTypes::add);
-            case "simpleType" -> handleSimpleType(startElement, xmlEventsIterator).map(simpleTypes::add);
+        switch (Util.tagName(startElement)) {
+            case "complexType" -> handleComplexType(startElement).map(c -> xsdTypes.putIfAbsent(c.name(), c));
+            case "simpleType" -> handleSimpleType(startElement, xmlEventsIterator).map(s -> xsdTypes.put(s.name(), s));
         }
     }
 
     private static Optional<SimpleType> handleSimpleType(StartElement startElement, Iterator<XMLEvent> xmlEventsIterator) {
-        var simpleTypeName = getAttributeValue(startElement, "name").orElse(null);
+        var simpleTypeName = Util.attributeValue(startElement, "name").orElse(null);
         if (simpleTypeName == null) {
             return Optional.empty();
         }
@@ -51,10 +95,11 @@ public class XsdParser {
             }
 
             if (nextEvent.isStartElement() && startElementEquals(nextEvent.asStartElement(), "restriction")) {
-                var baseType = getAttributeValue(nextEvent.asStartElement(), "base").orElse("");
+                var baseType = Util.attributeValue(nextEvent.asStartElement(), "base").orElse("");
                 return switch (baseType) {
                     case "xs:string" -> Optional.of(parseStringSimpleType(xmlEventsIterator, simpleTypeName));
-                    default -> throw new IllegalStateException("Unexpected value: " + getAttributeValue(nextEvent.asStartElement(), "base"));
+                    default ->
+                        throw new IllegalStateException("Unexpected value: " + Util.attributeValue(nextEvent.asStartElement(), "base"));
                 };
             }
         }
@@ -85,7 +130,7 @@ public class XsdParser {
 
             // Process restrictions on string
             if (nextElement.isStartElement()) {
-                var restriction = getAttributeValue(nextElement.asStartElement(), "value").orElse("");
+                var restriction = Util.attributeValue(nextElement.asStartElement(), "value").orElse("");
                 switch (nextElement.asStartElement().getName().getLocalPart()) {
                     case "pattern" -> xsdStringType.setPattern(restriction);
                     case "maxLength" -> xsdStringType.setMaxLength(Integer.parseInt(restriction));
@@ -106,14 +151,10 @@ public class XsdParser {
     }
 
     private static Optional<ComplexType> handleComplexType(StartElement complexTypeElement) {
-        var complexTypeName = getAttributeValue(complexTypeElement, "name");
+        var complexTypeName = Util.attributeValue(complexTypeElement, "name");
         return complexTypeName.map(ComplexType::new);
     }
 
-    private static Optional<String> getAttributeValue(StartElement element, String attributeName) {
-        return Optional.ofNullable(element.getAttributeByName(new QName(attributeName)))
-            .map(Attribute::getValue);
-    }
 
     public record ParseResult(List<ComplexType> complexTypes, List<SimpleType> simpleTypes) {
     }

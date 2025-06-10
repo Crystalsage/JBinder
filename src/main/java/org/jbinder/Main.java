@@ -10,6 +10,6 @@ public class Main {
     public static void main(String[] args) throws Exception {
         var xmlReader = new XmlReader();
         var elements = xmlReader.readXml(new FileInputStream(FILE_PATH));
-        System.out.println(XsdParser.parse(elements));
+        XsdParser.parse(elements);
     }
 }
